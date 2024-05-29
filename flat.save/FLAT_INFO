@@ -1,0 +1,4 @@
+flat_number=2           # 1 for"zf_normal",2 for "spst_pub",3 for "dm_pub_cpu"
+node_num=1
+ppn_num=32               # 0 for default
+wall_time="40:30:00"

@@ -1,0 +1,117 @@
+1. 重构镜像图和原图之间的边的连接，形成一个大图：
+
+G_new 的数量将等于 combinations_to_create 列表中有效组合的数量。在每次循环迭代中，根据 combinations_to_create 中的一个组合，我们复制原图 G 并根据该组合的矢量来平移所有节点的坐标，从而生成一个新的镜像图 G_new。
+
+每个组合代表一种不同的平移方式，因此如果 combinations_to_create 有 
+𝑛
+n 个有效的组合，你最终会生成 
+𝑛
+n 个独立的 G_new 图。这些图各自对应于原始图的一个独特的镜像，根据特定的晶格矢量组合进行平移。
+
+如果你需要进一步操作这些图（比如分析或保存），你可能需要在生成每个 G_new 之后立即进行处理，或者将它们存储在一个列表或字典中，以便于后续处理。例如，可以这样修改代码以保存所有生成的图：
+
+import numpy as np
+import networkx as nx
+from itertools import combinations
+import copy
+
+image_vetor_list = ['-a', '+c', '+a', '-c', '-b', '+b']
+
+def creat_image_graphs(G_original,image_vetor_list):
+    
+    combinations_to_create = []
+
+    # 生成所有可能的组合
+    def is_valid_combination(combo):
+        """检查组合是否有效，即不包含相对的矢量"""
+        seen_axes = set()
+        for vec in combo:
+            if vec[-1] in seen_axes:
+                return False
+            seen_axes.add(vec[-1])
+        return True
+
+    # 生成所有可能的组合
+    for i in range(1, len(image_vetor_list) + 1):
+        for combo in combinations(image_vetor_list, i):
+            if is_valid_combination(combo):
+                combinations_to_create.append(combo)
+    #print(combinations_to_create,len(combinations_to_create))  
+    
+    # 创建一个字典来存储所有生成的镜像图
+    graphs = {}
+    # 遍历所有组合以创建镜像图
+    for idx, combo in enumerate(combinations_to_create):
+        G_new = copy.deepcopy(G_original)
+        translation_vector = np.zeros((3,))
+    
+        for vec in combo:
+            sign = -1 if '-' in vec else 1
+            axis = vec[-1]  # 'a', 'b', 或 'c'
+    
+            # 找到对应的晶格矢量
+            if axis == 'a':
+                vector = sign * np.array(G_new.nodes[0]['feature'][-14:-11]).reshape((3,))
+            elif axis == 'b':
+                vector = sign * np.array(G_new.nodes[0]['feature'][-11:-8]).reshape((3,))
+            elif axis == 'c':
+                vector = sign * np.array(G_new.nodes[0]['feature'][-8:-5]).reshape((3,))
+    
+            translation_vector += vector
+    
+        # 更新所有节点的坐标
+        for node in G_new.nodes:
+            original_coords = np.array(G_new.nodes[node]['feature'][-5:-2])
+            G_new.nodes[node]['feature'][-5:-2] = original_coords + translation_vector
+    
+        # 保存平移后的图
+        graphs["".join(combo)] = G_new
+
+    # 此时 `graphs` 包含了所有生成的镜像图，每个镜像图都以其矢量组合的字符串标识为键（如 '-a+b-c'）
+    
+
+ok,现在让我们深入一些，我们在全图构建的时候给每个node赋予了位置信息储存在attr['bd_directions']里面，这些位置信息是一个列表类如[‘-a’,‘+c’]，说明了这些node代表的原子位于哪个边界，如果是不位于边界的原子则该属性是[], 现在我们需要把刚刚构建的镜像图和原先的图一起构建成一张大图，这就需要我们在镜像图和原图，镜像图和镜像图直接的边界上建立连接。建立连接的方法是比如我们从原图和位于+a方向上的镜像图为例：首先连接面肯定是原图的+a边界上（attr['bd_directions']里面只要含有+a都算）的原子和+a镜像-a边界上的原子（attr['bd_directions']里面只要含有-a都算），链接方法是首先查看原子图内包含+a边界的原子的有边连接邻居，如果这些邻居的attr['bd_directions']里面只要含有-a，查看他们的ind=int(feature[-2])+1的值, 然后查看+a镜像图上的镜像原子，镜像原子理论上来说ind=int(feature[-2])+1和原图的一样，然后把原图中+a面上连接的自己图中的包含-a方向的原子改连接为+a镜像图中的-a方向的镜像原子（改连接的意思是断开原有的边，添加和镜像原子连接的边）。同时对于+a图中+a方向上的原子也要改连接到原图中-a方向上去（因为周期性体系，首尾相连）。这样就完成了+a镜像图和原图的链接
+然后如果这时候还存在-a方向的镜像图，则把上面连接好的图拿过来，这个时候是原图的-a方向和-a镜像图的+a方向相连接，但是要注意了，这个时候原图的-a方向原子原先是和+a镜像图的+a方向的镜像原子相连接的，需要改连接到-a镜像图的+a方向，同时-a镜像图的-a方向原子也需要改链接到+a镜像图的+a方向原子。
+当我们处理完一个方向以后，按照这个方法继续处理b方向和c方向，但是需要注意，在一个方向构建的时候，另外和这些方向正交方向也需要构建平行的图，例如我在连接-a,原图，+a镜像连接出一个中间图的时候，-a+b,原图+b,+a+b也需要在a方向连接出另外一个中间图（如果combinations_to_create包含（-a,+a，+b))的话，然后再在b方向把这两个连接好的中间图连起来。
+如果是combinations_to_create包含（-a,+a，+b,-c))的话,情况会更复杂一点，首先需要连接-a,原图，+a镜像连接出一个中间图，-a+b,原图+b,+a+b也需要在a方向连接出另外一个中间图，-a-c,原图-c,+a-c也需要在a方向连接出另外一个中间图，-a+b-c,原图+b-c,+a+b-c也需要在a方向连接出另外一个中间图，然后再在b方向把首先连接的-a,原图，+a镜像连接出一个中间图和-a+b,原图+b,+a+b也需要在a方向连接出另外一个中间图拼起来形成一等中间图，-a-c,原图-c,+a-c也需要在a方向连接出的一个中间图和-a+b-c,原图+b-c,+a+b-c也需要在a方向连接出另外一个一等中间图，然后再在c方向把这两个一等中间图拼起来
+
+
+
+
+
+2.现在我们基本上已经写完了所有的模块，现在只剩下一件事情：通过av_combine_directs把所有镜像进行拼接成一个超胞（当然我在这边愿意称之为超图，毕竟我们实际上是在拼图，当然也不是puzzle那个拼图，不知道你能不能get到这个谐音梗。）
+
+我需要你调用你所有的空间想象能力，化身一个专业的几何学家以及代码学家
+
+你有一个函数可以在一个方向进行多次拼接：
+G_merged1 = connect_graphs(graph_test, G_images['+a'], '+a', '-a')
+print("G_merged1 has been merged")
+G_merged = connect_graphs(G_merged1, G_images['-a'], '-a', '+a')
+print("G_merged has been merged")
+然后你有一个list：av_combine_directs:[('+c',), ('+a',), ('-a',), ('-c',), ('+b',), ('-b',), ('+c', '+a'), ('+c', '-a'), ('+c', '+b'), ('+c', '-b'), ('+a', '-c'), ('+a', '+b'), ('+a', '-b'), ('-a', '-c'), ('-a', '+b'), ('-a', '-b'), ('-c', '+b'), ('-c', '-b'), ('+c', '+a', '+b'), ('+c', '+a', '-b'), ('+c', '-a', '+b'), ('+c', '-a', '-b'), ('+a', '-c', '+b'), ('+a', '-c', '-b'), ('-a', '-c', '+b'), ('-a', '-c', '-b')]
+你需要把他们拼起来，但是有一定的规则。首先：我们明确这里最多只有三个维度a,b,c，所以你需要拼最多三次，每次拼接的时候会有多个分成几组的镜像需要拼接。拼接有一定的规则，首先你必须拼完一个方向所有的镜像图才能拼另外一个方向。其次你在拼一个方向的时候，以这边为例，除了原图（记为O）为起点，假设拼接第一次是a方向，你先拼了O&+a, 然后是（O&+a）&-a，此时你得到了a方向长度为3的一个拼图，与此同时你需要把其他的带a方向的图也拼成a方向长度为3 的拼图，例如 +b为起点，（+b&+a+b）&-a+b, 或者+b+c为起点：
+（+b+c&+a+b+c）&-a+b+c,还有以-b为起点，+c为起点，-c为起点，+b-c为起点，-b+c为起点等等等等。然后第二步你需要拼b方向：(（（O&+a）&-a）&（（+b&+a+b）&-a+b）)&((-b&+a-b)&-a-b)，还是以第一次包含O的在a方向长度为3的小条条为例，在b方向拼接起来，你需要在O处拼接b方向的三个，在+c处拼接b方向的三个，在-c处拼接b方向的三个，等等，最后拼c方向，只拼接一次。这个
+list：av_combine_directs是由   ['-a', '+c', '+a', '-c', '-b', '+b']通过函数：
+
+ combinations_to_create = []
+
+    # 生成所有可能的组合
+    def is_valid_combination(combo):
+        """检查组合是否有效，即不包含相对的矢量"""
+        seen_axes = set()
+        for vec in combo:
+            if vec[-1] in seen_axes:
+                return False
+            seen_axes.add(vec[-1])
+        return True
+
+    # 生成所有可能的组合
+    for i in range(1, len(image_vetor_list) + 1):
+        for combo in combinations(image_vetor_list, i):
+            if is_valid_combination(combo):
+                combinations_to_create.append(combo)
+    #print(combinations_to_create,len(combinations_to_create)) 
+生成的
+
+请你按照我给你的提示，让我们用思维链一步一步来，如果你觉得很抽象，你就想想一个点是怎么变成一个体的，首先在一维方向上无数个点拼成一条线，然后这条线和无数条线组成一个面，然后这个面和无数个面组成一个体， 我们这里也一样，只不过无数换成了3，a方向你需要拼3*3次，b方向你需要拼3次，c方向只需要拼一次，当然这个是由av_combine_directs是由['-a', '+c', '+a', '-c', '-b', '+b']决定的。
+注2：你在调用-b+c方向的图时，直接G_images['-b+c']即可

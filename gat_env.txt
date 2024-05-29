@@ -1,0 +1,1 @@
+pip install torch torch_geometric pymatgen scikit-learn mendeleev plotly networkx pandas numpy matplotlib -i https://pypi.tuna.tsinghua.edu.cn/simple
